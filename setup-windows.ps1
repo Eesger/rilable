@@ -47,7 +47,10 @@ $backendDir = Join-Path $repoDir    "backend"
 
 if (Test-Path (Join-Path $repoDir ".git")) {
     Write-Ok "Repo already exists - pulling latest"
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     git -C $repoDir pull --ff-only origin main 2>&1 | Out-Null
+    $ErrorActionPreference = $prevPref
 } else {
     Write-Ok "Cloning repo..."
     git clone https://github.com/eesger/rilable.git $repoDir
@@ -67,18 +70,22 @@ Write-Ok "npm install complete"
 # ---------------------------------------------------------------------------
 
 Write-Step "Setting up Convex backend"
-Write-Host ""
-Write-Host "  A browser window will open so you can log in with GitHub or Google."
-Write-Host "  Convex is free. After login it creates a project and saves your"
-Write-Host "  CONVEX_URL to backend\.env.local."
-Write-Host ""
-Write-Host "  Press Enter to continue..."
-Read-Host | Out-Null
-
 Set-Location $backendDir
-npx convex dev --once --configure new
-
 $envFile = Join-Path $backendDir ".env.local"
+if (Test-Path $envFile) {
+    Write-Ok "backend\.env.local already exists - skipping Convex login"
+} else {
+    Write-Host ""
+    Write-Host "  A browser window will open so you can log in with GitHub or Google."
+    Write-Host "  Convex is free. After login it creates a project and saves your"
+    Write-Host "  CONVEX_URL to backend\.env.local."
+    Write-Host ""
+    Write-Host "  Press Enter to continue..."
+    Read-Host | Out-Null
+    npx convex dev --once --configure new
+}
+
+# envFile already set above
 if (-not (Test-Path $envFile)) {
     Write-Fail "backend\.env.local was not created. Did the Convex login succeed?"
 }
