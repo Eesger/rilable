@@ -523,27 +523,28 @@ AI SKILL — every app you build has FREE access to a built-in AI endpoint (auth
 }
 
 async function callClaude(system: string, user: string, model: string): Promise<string> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not set on the Convex deployment");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("OPENROUTER_API_KEY is not set on the Convex deployment");
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
+      "Authorization": `Bearer ${key}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       model,
       max_tokens: 16000,
       stream: true,
-      system,
-      messages: [{ role: "user", content: user }],
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
     }),
     signal: AbortSignal.timeout(540_000),
   });
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Claude API error (${res.status}): ${body.slice(0, 300)}`);
+    throw new Error(`OpenRouter API error (${res.status}): ${body.slice(0, 300)}`);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -561,18 +562,17 @@ async function callClaude(system: string, user: string, model: string): Promise<
       if (!payload || payload === "[DONE]") continue;
       try {
         const event = JSON.parse(payload);
-        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-          text += event.delta.text;
-        }
-        if (event.type === "error") {
-          throw new Error(`Claude stream error: ${event.error?.message ?? "unknown"}`);
+        const chunk = event.choices?.[0]?.delta?.content;
+        if (typeof chunk === "string") text += chunk;
+        if (event.error) {
+          throw new Error(`OpenRouter stream error: ${event.error?.message ?? "unknown"}`);
         }
       } catch (err) {
-        if (err instanceof Error && err.message.startsWith("Claude stream error")) throw err;
+        if (err instanceof Error && err.message.startsWith("OpenRouter stream error")) throw err;
       }
     }
   }
-  if (!text.trim()) throw new Error("Claude returned an empty response");
+  if (!text.trim()) throw new Error("OpenRouter returned an empty response");
   return text;
 }
 
