@@ -165,11 +165,11 @@ Write-Host ""
 Write-Host "  Smoke test (paste into a new PowerShell window):"
 Write-Host ""
 Write-Host "    cd $backendDir"
-Write-Host '    npx convex run projects:create "{""prompt"":""a hello world page""}"'
+Write-Host '    npx convex run projects:create "{\"prompt\":\"a hello world page\"}"'
 Write-Host ""
 Write-Host "  It returns a project ID. After ~2 min check the result:"
 Write-Host ""
-Write-Host '    npx convex run projects:get "{""id"":""<paste-id-here>""}"'
+Write-Host '    npx convex run projects:get "{\"id\":\"<paste-id-here>\"}"'
 Write-Host ""
 Write-Host "  Open the previewUrl in your browser to see the generated app."
 Write-Host ""
