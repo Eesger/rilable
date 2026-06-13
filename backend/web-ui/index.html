@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rilable — App Builder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .pulse { animation: pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="text-xl">🔨</span>
+      <span class="font-semibold tracking-tight">Rilable</span>
+    </div>
+    <div class="flex items-center gap-2 text-sm">
+      <span id="dot" class="w-2 h-2 rounded-full bg-gray-600 pulse"></span>
+      <span id="dot-label" class="text-gray-500 text-xs">Not connected</span>
+    </div>
+  </header>
+
+  <!-- Convex URL bar -->
+  <div class="bg-gray-900 border-b border-gray-800 px-6 py-3">
+    <div class="max-w-3xl mx-auto flex items-center gap-2">
+      <label class="text-xs text-gray-500 shrink-0">Convex URL</label>
+      <input id="url-input" type="text" spellcheck="false"
+        class="flex-1 bg-gray-800 text-xs font-mono text-gray-300 px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
+        placeholder="https://your-deployment.convex.cloud">
+      <button id="url-save"
+        class="text-xs bg-blue-700 hover:bg-blue-600 px-3 py-1.5 rounded font-medium transition-colors">
+        Connect
+      </button>
+    </div>
+  </div>
+
+  <!-- Build form -->
+  <div class="max-w-3xl mx-auto px-6 py-6">
+    <form id="build-form" class="flex gap-2">
+      <input id="prompt" type="text" autocomplete="off"
+        class="flex-1 bg-gray-900 border border-gray-800 hover:border-gray-700 focus:border-blue-500 rounded-lg px-4 py-3 text-sm focus:outline-none placeholder-gray-600 transition-colors"
+        placeholder="Describe the app you want to build…">
+      <select id="model-select"
+        class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-3 text-sm text-gray-300 focus:outline-none focus:border-blue-500">
+        <option value="claude-haiku-4-5">Haiku · fast</option>
+        <option value="claude-sonnet-4-6" selected>Sonnet · default</option>
+        <option value="claude-opus-4-8">Opus · smart</option>
+      </select>
+      <button id="build-btn" type="submit"
+        class="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-3 rounded-lg text-sm font-medium transition-colors">
+        Build
+      </button>
+    </form>
+  </div>
+
+  <!-- Project list -->
+  <div class="max-w-3xl mx-auto px-6 pb-12">
+    <div id="empty" class="text-center py-24 hidden">
+      <div class="text-5xl mb-4">🔨</div>
+      <p class="text-gray-600">No apps yet — describe one above to get started.</p>
+    </div>
+    <div id="projects" class="flex flex-col gap-3"></div>
+  </div>
+
+<script type="module">
+import { ConvexHttpClient } from "https://esm.sh/convex@1.27.0/browser";
+
+// ── State ────────────────────────────────────────────────────────────────────
+let client = null;
+let timer  = null;
+
+const urlInput   = document.getElementById("url-input");
+const urlSave    = document.getElementById("url-save");
+const buildForm  = document.getElementById("build-form");
+const promptEl   = document.getElementById("prompt");
+const modelEl    = document.getElementById("model-select");
+const buildBtn   = document.getElementById("build-btn");
+const projectsEl = document.getElementById("projects");
+const emptyEl    = document.getElementById("empty");
+const dot        = document.getElementById("dot");
+const dotLabel   = document.getElementById("dot-label");
+
+// ── Persist URL ──────────────────────────────────────────────────────────────
+const saved = localStorage.getItem("rilable_url") || "";
+urlInput.value = saved;
+if (saved) connect(saved);
+
+urlSave.addEventListener("click", () => {
+  const url = urlInput.value.trim().replace(/\/$/, "");
+  if (!url) return;
+  localStorage.setItem("rilable_url", url);
+  connect(url);
+});
+
+urlInput.addEventListener("keydown", e => { if (e.key === "Enter") urlSave.click(); });
+
+// ── Connection ───────────────────────────────────────────────────────────────
+function connect(url) {
+  if (timer) clearInterval(timer);
+  client = new ConvexHttpClient(url);
+  setDot("connecting");
+  refresh();
+  timer = setInterval(refresh, 2500);
+}
+
+async function refresh() {
+  if (!client) return;
+  try {
+    const projects = await client.query("projects:list", {});
+    renderProjects(projects);
+    setDot("ok", `${projects.length} app${projects.length !== 1 ? "s" : ""}`);
+  } catch {
+    setDot("error", "Connection failed");
+  }
+}
+
+function setDot(state, label) {
+  const colors = { ok: "bg-green-500", error: "bg-red-500", connecting: "bg-yellow-500 pulse" };
+  dot.className = `w-2 h-2 rounded-full ${colors[state] ?? "bg-gray-600"}`;
+  dotLabel.textContent = label ?? state;
+}
+
+// ── Build ─────────────────────────────────────────────────────────────────────
+buildForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!client) { alert("Enter your Convex URL and click Connect first."); return; }
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+
+  buildBtn.disabled = true;
+  buildBtn.textContent = "Queuing…";
+  try {
+    await client.mutation("projects:create", { prompt, model: modelEl.value });
+    promptEl.value = "";
+    await refresh();
+  } catch (err) {
+    alert("Error: " + err.message);
+  } finally {
+    buildBtn.disabled = false;
+    buildBtn.textContent = "Build";
+  }
+});
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderProjects(projects) {
+  if (!projects || !projects.length) {
+    emptyEl.classList.remove("hidden");
+    projectsEl.innerHTML = "";
+    return;
+  }
+  emptyEl.classList.add("hidden");
+  projectsEl.innerHTML = projects.map(p => card(p)).join("");
+}
+
+const statusStyles = {
+  queued:   { badge: "bg-gray-800 text-gray-400",    bar: "bg-gray-700 w-1/6" },
+  building: { badge: "bg-yellow-950 text-yellow-400", bar: "bg-yellow-500 w-2/3 pulse" },
+  live:     { badge: "bg-green-950 text-green-400",  bar: "bg-green-500 w-full" },
+  error:    { badge: "bg-red-950 text-red-400",      bar: "bg-red-600 w-full" },
+};
+
+function card(p) {
+  const st = statusStyles[p.status] ?? statusStyles.queued;
+  const age = elapsed(p._creationTime);
+  const detail = p.statusDetail ? `<p class="text-xs text-gray-600 mt-1">${esc(p.statusDetail)}</p>` : "";
+  const errMsg = p.error        ? `<p class="text-xs text-red-500 mt-1">${esc(p.error)}</p>` : "";
+  const preview = p.previewUrl
+    ? `<a href="${p.previewUrl}" target="_blank" rel="noopener"
+         class="inline-block mt-3 text-xs bg-green-700 hover:bg-green-600 px-3 py-1.5 rounded font-medium transition-colors">
+         Open app →
+       </a>`
+    : "";
+
+  return `
+<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+  <div class="h-0.5 ${st.bar} transition-all duration-700"></div>
+  <div class="p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-xl shrink-0">${esc(p.emoji ?? "✨")}</span>
+        <div class="min-w-0">
+          <div class="font-medium text-sm truncate">${esc(p.name)}</div>
+          <div class="text-xs text-gray-600">${age}</div>
+        </div>
+      </div>
+      <span class="text-xs px-2 py-0.5 rounded-full shrink-0 ${st.badge}">${p.status}</span>
+    </div>
+    <p class="mt-2 text-sm text-gray-400 leading-relaxed">${esc(p.prompt)}</p>
+    ${detail}${errMsg}${preview}
+  </div>
+</div>`;
+}
+
+function elapsed(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 5)   return "just now";
+  if (s < 60)  return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
+}
+
+function esc(str) {
+  return String(str ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+</body>
+</html>
